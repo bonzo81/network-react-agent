@@ -1,0 +1,24 @@
+{
+    "query_patterns": {
+        "site_connectivity": {
+            "description": "Analyze connections between sites",
+            "optimal_endpoints": {
+                "primary": {
+                    "endpoint": "/api/dcim/cable-terminations/",
+                    "why": "Provides direct mapping of cable endpoints with site, device, and interface details in a single query",
+                    "filters": {
+                        "site": "Source site name",
+                        "termination_type": "dcim.interface"
+                    }
+                }
+            },
+            "keywords": [
+                "connection",
+                "connected",
+                "links",
+                "between sites",
+                "cross-connect"
+            ]
+        }
+    }
+}
