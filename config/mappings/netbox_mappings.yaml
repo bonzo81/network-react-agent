@@ -1,0 +1,31 @@
+# Data field mappings for Netbox
+
+device:
+  standard_fields:
+    name: "name"
+    id: "id"
+    status: "status.value"
+    model: "device_type.model"
+    serial: "serial"
+    site: "site.name"
+    rack: "rack.name"
+    position: "position"
+    ip_address: "primary_ip4.address"
+
+interface:
+  standard_fields:
+    name: "name"
+    type: "type.value"
+    enabled: "enabled"
+    mtu: "mtu"
+    mac_address: "mac_address"
+    description: "description"
+
+alert:
+  standard_fields:
+    id: "id"
+    title: "name"
+    severity: "priority.label"
+    status: "status.value"
+    created: "created"
+    updated: "last_updated"

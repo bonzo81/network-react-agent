@@ -1,0 +1,20 @@
+# Netbox tool configuration
+
+api:
+  url: "${NETBOX_URL}"
+  token: "${NETBOX_TOKEN}"
+  version: "3.5"
+  verify_ssl: true
+  timeout: 30
+
+settings:
+  device_query_limit: 1000
+  cache_enabled: true
+  cache_timeout: 300
+
+features:
+  topology: true
+  config_backup: true
+  performance_metrics: true
+
+aliases: ["nx", "nbox"]

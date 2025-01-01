@@ -1,0 +1,29 @@
+# Data field mappings for LibreNMS
+
+device:
+  standard_fields:
+    name: "hostname"
+    id: "device_id"
+    status: "status"
+    model: "hardware"
+    serial: "serial"
+    site: "location"
+    ip_address: "ip"
+
+interface:
+  standard_fields:
+    name: "ifName"
+    type: "ifType"
+    enabled: "ifAdminStatus"
+    mtu: "ifMtu"
+    mac_address: "ifPhysAddress"
+    description: "ifAlias"
+
+alert:
+  standard_fields:
+    id: "id"
+    title: "rule_name"
+    severity: "severity"
+    status: "state"
+    created: "timestamp"
+    updated: "lastchange"

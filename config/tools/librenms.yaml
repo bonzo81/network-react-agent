@@ -1,0 +1,21 @@
+# LibreNMS tool configuration
+
+api:
+  url: "${LIBRENMS_URL}"
+  token: "${LIBRENMS_TOKEN}"
+  verify_ssl: true
+  timeout: 30
+
+settings:
+  polling_interval: 300
+  alert_severity_mapping:
+    critical: 5
+    warning: 4
+    info: 3
+
+features:
+  alerts: true
+  performance_metrics: true
+  interface_statistics: true
+
+aliases: ["libre", "lnms"]
