@@ -1,8 +1,3 @@
-"""
-Abstract base class defining the interface for network tool adapters.
-All network tool implementations must inherit from this class and implement its methods.
-"""
-
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any
 
