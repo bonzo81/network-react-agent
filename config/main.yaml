@@ -1,0 +1,36 @@
+# Main configuration file for network-react-agent
+
+# Tool Configuration
+tools:
+  netbox:
+    enabled: true
+    aliases: ["nx", "nbox"]
+    config_file: "tools/netbox.yaml"
+    mappings_file: "mappings/netbox_mappings.yaml"
+
+  librenms:
+    enabled: true
+    aliases: ["libre", "lnms"]
+    config_file: "tools/librenms.yaml"
+    mappings_file: "mappings/librenms_mappings.yaml"
+
+# Global Settings
+settings:
+  default_behavior:
+    query_all_enabled: true  # When no specific tool is specified, query all enabled tools
+    concurrent_queries: true  # Run queries to multiple tools concurrently
+    timeout_seconds: 30
+    cache_duration_minutes: 5
+
+  response_format:
+    include_tool_source: true  # Include which tool provided each piece of data
+    standardize_output: true   # Apply data mapping standardization
+
+logging:
+  level: INFO
+  file: logs/network_agent.log
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+security:
+  verify_ssl: true
+  enable_env_vars: true  # Enable environment variable substitution in config files
