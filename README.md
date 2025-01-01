@@ -13,6 +13,7 @@ This project implements a ReAct pattern for network operations, enabling intelli
 - Support for OpenAI-compatible LLM endpoints (OpenAI, Anthropic, Ollama)
 - Flexible query handling for complex network analysis
 - Optimized endpoint usage based on expert patterns
+- Multiple configuration methods (environment variables, YAML, or both)
 
 ## Installation
 
@@ -39,56 +40,93 @@ pip install -e ".[dev]"
 
 ## Configuration
 
-1. Create configuration file:
+The agent supports multiple configuration methods:
+
+### 1. Environment Variables (Recommended for sensitive data)
+
 ```bash
-cp config/config.example.yaml config/config.yaml
+# Copy the example .env file
+cp .env.example .env
+
+# Edit with your values
+vim .env
 ```
 
-2. Set up environment variables:
+Required environment variables:
 ```bash
-# Create .env file
-cat > .env << EOL
+# NetBox Configuration
+NETBOX_URL=https://netbox.example.com
 NETBOX_TOKEN=your_netbox_token
+
+# LibreNMS Configuration
+LIBRENMS_URL=https://librenms.example.com
 LIBRENMS_TOKEN=your_librenms_token
+
+# LLM Configuration
 OPENAI_API_KEY=your_openai_key
-EOL
 ```
 
-3. Update configuration in `config/config.yaml`:
+Optional environment variables:
+```bash
+# NetBox optional settings
+NETBOX_TIMEOUT=30
+
+# LibreNMS optional settings
+LIBRENMS_TIMEOUT=30
+
+# LLM optional settings
+OPENAI_API_BASE=http://localhost:11434/v1  # For Ollama
+LLM_MODEL=gpt-4
+LLM_TEMPERATURE=0
+```
+
+### 2. YAML Configuration (Recommended for complex settings)
+
+```bash
+# Copy the example configuration
+cp config/config.example.yaml config/config.yaml
+
+# Edit with your values
+vim config/config.yaml
+```
+
+Example configuration:
 ```yaml
 netbox:
-  base_url: "https://your-netbox-instance"
+  base_url: "https://netbox.example.com"
+  api_token: "your_netbox_token"
   timeout: 30
+  verify_ssl: true
 
 librenms:
-  base_url: "https://your-librenms-instance"
+  base_url: "https://librenms.example.com"
+  api_token: "your_librenms_token"
   timeout: 30
+  verify_ssl: true
+
+llm:
+  api_key: "your_openai_key"
+  model: "gpt-4"
+  temperature: 0
 ```
+
+### Configuration Priority
+
+The configuration system follows this priority order:
+1. Environment variables (highest priority)
+2. .env file values
+3. YAML config file values
+4. Default values (lowest priority)
 
 ## Usage
 
-### Basic Usage
+### Using Environment Variables
 
 ```python
-from network_agent import NetworkReActAgent, NetworkClient
+from network_agent import NetworkReActAgent
 
-# Initialize clients
-netbox_client = NetworkClient(
-    base_url="https://netbox.example.com",
-    api_token="your-token"
-)
-
-librenms_client = NetworkClient(
-    base_url="https://librenms.example.com",
-    api_token="your-token"
-)
-
-# Initialize agent
-agent = NetworkReActAgent(
-    netbox_client=netbox_client,
-    librenms_client=librenms_client,
-    api_key="your-llm-api-key"
-)
+# Initialize agent using environment variables
+agent = NetworkReActAgent.from_env()
 
 # Process a query
 response = agent.process_query(
@@ -97,28 +135,38 @@ response = agent.process_query(
 print(response)
 ```
 
-### Using Different LLM Providers
-
-The agent supports any OpenAI-compatible endpoint:
+### Using Configuration File
 
 ```python
-# Using Ollama
-agent = NetworkReActAgent(
-    netbox_client=netbox_client,
-    librenms_client=librenms_client,
-    api_base="http://localhost:11434/v1",
-    api_key="not-needed-for-ollama",
-    model="llama2"
-)
+from network_agent import NetworkReActAgent
 
-# Using Anthropic (via OpenAI-compatible endpoint)
-agent = NetworkReActAgent(
-    netbox_client=netbox_client,
-    librenms_client=librenms_client,
-    api_base="your-anthropic-compatible-endpoint",
-    api_key="your-anthropic-key",
-    model="claude-3-opus-20240229"
+# Initialize agent using config file
+agent = NetworkReActAgent.from_config('config/config.yaml')
+
+# Process a query
+response = agent.process_query(
+    "What is the current utilization of links between datacenter sites?"
 )
+print(response)
+```
+
+### Using Different LLM Providers
+
+The agent supports any OpenAI-compatible endpoint. Configure via environment variables or YAML:
+
+```python
+# Using Ollama (via environment variables)
+# In .env:
+OPENAI_API_BASE=http://localhost:11434/v1
+OPENAI_API_KEY=not-needed-for-ollama
+LLM_MODEL=llama2
+
+# Using Anthropic (via config file)
+# In config.yaml:
+llm:
+  api_base: "your-anthropic-compatible-endpoint"
+  api_key: "your-anthropic-key"
+  model: "claude-3-opus-20240229"
 ```
 
 ## Development
@@ -155,9 +203,7 @@ network_agent/
 │       ├── core/           # Core logic
 │       └── utils/          # Utilities
 ├── tests/                  # Test suite
-│   ├── conftest.py
-│   └── test_*.py
-├── setup.py               # Package setup
+├── .env.example           # Environment variables example
 └── README.md             # Documentation
 ```
 
