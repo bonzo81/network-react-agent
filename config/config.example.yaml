@@ -1,12 +1,35 @@
+# Network ReAct Agent Configuration
+
+# NetBox Configuration
 netbox:
   base_url: "https://netbox.example.com"
   timeout: 30
+  verify_ssl: true
+  # Optional: API version
+  api_version: "3.5"
 
+# LibreNMS Configuration
 librenms:
   base_url: "https://librenms.example.com"
   timeout: 30
+  verify_ssl: true
 
+# LLM Configuration
+llm:
+  provider: "openai"  # or "anthropic", "ollama"
+  model: "gpt-4"      # or "claude-3-opus-20240229", "llama2"
+  temperature: 0
+  # Optional: Custom API endpoint
+  # api_base: "http://localhost:11434/v1"
+
+# Logging Configuration
 logging:
-  level: INFO
-  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-  file: 'network_agent.log'
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "network_agent.log"
+
+# Advanced Configuration
+query_optimization:
+  cache_ttl: 300  # Cache results for 5 minutes
+  max_retries: 3  # Number of retry attempts for failed API calls
+  concurrent_queries: true  # Enable concurrent API queries when possible

@@ -2,23 +2,99 @@
     "query_patterns": {
         "site_connectivity": {
             "description": "Analyze connections between sites",
-            "optimal_endpoints": {
-                "primary": {
-                    "endpoint": "/api/dcim/cable-terminations/",
-                    "why": "Provides direct mapping of cable endpoints with site, device, and interface details in a single query",
-                    "filters": {
-                        "site": "Source site name",
-                        "termination_type": "dcim.interface"
-                    }
-                }
-            },
             "keywords": [
                 "connection",
                 "connected",
                 "links",
                 "between sites",
                 "cross-connect"
-            ]
+            ],
+            "optimal_endpoints": {
+                "primary": {
+                    "system": "netbox",
+                    "endpoint": "/api/dcim/cable-terminations/",
+                    "filters": {
+                        "termination_type": "dcim.interface"
+                    },
+                    "why": "Provides direct mapping of cable endpoints with site, device, and interface details"
+                },
+                "secondary": [
+                    {
+                        "system": "librenms",
+                        "endpoint": "/api/v0/ports/{device_id}",
+                        "purpose": "get_performance_data",
+                        "why": "Get interface performance metrics"
+                    }
+                ]
+            }
+        },
+        "performance_analysis": {
+            "description": "Analyze network performance metrics",
+            "keywords": [
+                "performance",
+                "bandwidth",
+                "utilization",
+                "metrics",
+                "usage"
+            ],
+            "optimal_endpoints": {
+                "primary": {
+                    "system": "librenms",
+                    "endpoint": "/api/v0/devices/{device_id}/metrics",
+                    "filters": {
+                        "timestamp": "1h"
+                    },
+                    "why": "Get comprehensive device metrics"
+                }
+            }
+        },
+        "device_inventory": {
+            "description": "Query device inventory and configuration",
+            "keywords": [
+                "inventory",
+                "device",
+                "hardware",
+                "configuration",
+                "settings"
+            ],
+            "optimal_endpoints": {
+                "primary": {
+                    "system": "netbox",
+                    "endpoint": "/api/dcim/devices/",
+                    "why": "Get device inventory information"
+                }
+            }
+        }
+    },
+    "error_patterns": {
+        "netbox": {
+            "not_found": {
+                "pattern": "Not Found",
+                "message": "The requested resource was not found in NetBox",
+                "action": "Verify the resource exists and check permissions"
+            },
+            "unauthorized": {
+                "pattern": "Authentication credentials were not provided",
+                "message": "Invalid or missing API token",
+                "action": "Check API token configuration"
+            }
+        },
+        "librenms": {
+            "device_not_found": {
+                "pattern": "Device not found",
+                "message": "The specified device was not found in LibreNMS",
+                "action": "Verify device exists and is being monitored"
+            }
+        }
+    },
+    "response_templates": {
+        "connectivity_analysis": {
+            "template": "Found {count} connections between {site_a} and {site_b}:\n{connections}",
+            "connection_detail": "- {type} connection via {device_a} to {device_b} ({speed})"
+        },
+        "performance_report": {
+            "template": "Performance metrics for {device}:\n{metrics}",
+            "metric_detail": "- {metric_name}: {value} {unit}"
         }
     }
 }
