@@ -5,44 +5,39 @@ from langchain.memory import ConversationBufferMemory
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 import logging
+import re
 from .query_planner import QueryPlanner
 from .context_manager import ContextManager
-from ..api.network_client import NetworkClient, APIResponse
-from ..utils.config import Configuration
+from .tool_manager import ToolManager
+from ..utils.config_loader import ConfigLoader
 
 class NetworkReActAgent:
+    # Regular expression for tool directives
+    TOOL_DIRECTIVE_PATTERN = re.compile(r'^@([\w-]+)\s+(.*)$')
+
     def __init__(
         self,
-        config_path: Optional[str] = None,
+        config_dir: str = 'config',
         semantic_mappings: Optional[Dict] = None
     ):
-        self.config = Configuration(config_path)
         self.logger = logging.getLogger("NetworkReActAgent")
-
-        # Initialize API clients
-        self.netbox = NetworkClient(
-            base_url=self.config.get('netbox.base_url'),
-            api_token=self.config.get('netbox.api_token'),
-            timeout=self.config.get('netbox.timeout', 30),
-            verify_ssl=self.config.get('netbox.verify_ssl', True)
-        )
-
-        self.librenms = NetworkClient(
-            base_url=self.config.get('librenms.base_url'),
-            api_token=self.config.get('librenms.api_token'),
-            timeout=self.config.get('librenms.timeout', 30),
-            verify_ssl=self.config.get('librenms.verify_ssl', True)
-        )
-
+        
+        # Initialize configuration and managers
+        self.config_loader = ConfigLoader(config_dir)
+        self.config = self.config_loader.load_all()
+        
+        # Initialize tool manager
+        self.tool_manager = ToolManager(config_dir)
+        
         # Initialize LLM
         self.llm = OpenAI(
-            api_key=self.config.get('llm.api_key'),
-            base_url=self.config.get('llm.api_base'),
-            model=self.config.get('llm.model', 'gpt-4'),
-            temperature=self.config.get('llm.temperature', 0)
+            api_key=self.config['main'].get('llm', {}).get('api_key'),
+            base_url=self.config['main'].get('llm', {}).get('api_base'),
+            model=self.config['main'].get('llm', {}).get('model', 'gpt-4'),
+            temperature=self.config['main'].get('llm', {}).get('temperature', 0)
         )
 
-        # Initialize managers
+        # Initialize other managers
         self.context_manager = ContextManager()
         self.planner = QueryPlanner(semantic_mappings, llm=self.llm)
         self.memory = ConversationBufferMemory(memory_key="chat_history")
@@ -52,23 +47,29 @@ class NetworkReActAgent:
         self.agent_executor = self._create_agent()
 
     def _create_enhanced_prompt(self) -> PromptTemplate:
-        prefix = """You are a network specialist assistant with access to NetBox and LibreNMS APIs.
+        # Get available tools for prompt
+        available_tools = ", ".join([f"@{tool}" for tool in self.tool_manager.tools.keys()])
+        
+        prefix = f"""You are a network operations assistant with access to multiple network management tools.
 
-        Key capabilities:
-        - NetBox provides: device inventory, rack locations, IP addresses, circuits
-        - LibreNMS provides: performance metrics, alerts, interface status
+        Available tools: {available_tools}
+        You can target specific tools using @tool syntax, e.g., '@netbox show devices'
+
+        Tool capabilities:
+        {self._get_tool_capabilities()}
 
         Context:
-        {context_summary}
+        {{context_summary}}
 
         Available patterns:
-        {query_patterns}
+        {{query_patterns}}
 
         When analyzing queries:
-        1. Consider which system(s) will have the required information
-        2. Break down complex queries into smaller steps
-        3. Look for relationships between data from different systems
-        4. Consider recent context for related information
+        1. Check if a specific tool is requested (@tool syntax)
+        2. Consider which tool(s) have the required information
+        3. Break down complex queries into steps
+        4. Look for relationships between data from different tools
+        5. Consider recent context for related information
         """
 
         suffix = """Question: {input}
@@ -80,22 +81,27 @@ class NetworkReActAgent:
             template=prefix + suffix
         )
 
+    def _get_tool_capabilities(self) -> str:
+        """Generate description of tool capabilities from config"""
+        capabilities = []
+        for tool_name, tool in self.tool_manager.tools.items():
+            features = self.config['tools'].get(tool_name, {}).get('features', {})
+            enabled_features = [k for k, v in features.items() if v]
+            capabilities.append(f"- {tool_name}: {', '.join(enabled_features)}")
+        return "\n".join(capabilities)
+
     def _create_tools(self) -> List[Tool]:
+        """Create LangChain tools for each network operation"""
         return [
             Tool(
-                name="query_netbox",
-                func=self._query_netbox,
-                description="Query NetBox for infrastructure information"
-            ),
-            Tool(
-                name="query_librenms",
-                func=self._query_librenms,
-                description="Query LibreNMS for monitoring data"
+                name="query_tool",
+                func=self._execute_tool_query,
+                description="Query specific network tool or all tools"
             ),
             Tool(
                 name="analyze_connectivity",
                 func=self._analyze_connectivity,
-                description="Analyze network connectivity"
+                description="Analyze network connectivity between devices"
             )
         ]
 
@@ -117,101 +123,72 @@ class NetworkReActAgent:
             verbose=True
         )
 
-    def _query_netbox(self, query: str) -> str:
+    def _execute_tool_query(self, query: str) -> str:
+        """Execute a query against specific tool(s)"""
         try:
-            steps = self.planner.create_plan(query)
+            # Check for tool directive
+            match = self.TOOL_DIRECTIVE_PATTERN.match(query)
+            if match:
+                tool_name, tool_query = match.groups()
+                self.tool_manager.select_tool(tool_name)
+            else:
+                tool_name = None
+                tool_query = query
+                self.tool_manager.select_tool(None)  # Clear tool selection
+
+            # Create and optimize query plan
+            steps = self.planner.create_plan(tool_query)
             responses = []
 
             for step in self.planner.optimize_plan(steps):
-                if step.system != "netbox":
-                    continue
-
-                self.logger.debug(f"Executing NetBox step: {step.purpose}")
-                response = self.netbox.query(
-                    endpoint=step.endpoint,
-                    params=step.filters
+                # Execute query through tool manager
+                result = self.tool_manager.execute_query(
+                    tool_name,
+                    step.method,
+                    filters=step.filters
                 )
 
-                if response.success:
-                    responses.append(response.data)
-                    self.context_manager.record_query(
-                        query=query,
-                        pattern="netbox_query",
-                        success=True,
-                        results=response.data
-                    )
-                else:
-                    self.logger.error(f"NetBox query failed: {response.error}")
-                    self.context_manager.record_query(
-                        query=query,
-                        pattern="netbox_query",
-                        success=False,
-                        results={"error": response.error}
-                    )
-                    return f"Error querying NetBox: {response.error}"
+                if any('error' in r for r in result.values()):
+                    errors = [f"{t}: {r['error']}" for t, r in result.items() if 'error' in r]
+                    return f"Errors occurred: {'; '.join(errors)}"
+
+                responses.append(result)
+
+            # Record query in context
+            self.context_manager.record_query(
+                query=query,
+                pattern="tool_query",
+                success=True,
+                results=responses
+            )
 
             return self._format_responses(responses)
 
         except Exception as e:
-            self.logger.error(f"Error in NetBox query: {e}")
-            return f"An error occurred: {str(e)}"
-
-    def _query_librenms(self, query: str) -> str:
-        try:
-            steps = self.planner.create_plan(query)
-            responses = []
-
-            for step in self.planner.optimize_plan(steps):
-                if step.system != "librenms":
-                    continue
-
-                self.logger.debug(f"Executing LibreNMS step: {step.purpose}")
-                response = self.librenms.query(
-                    endpoint=step.endpoint,
-                    params=step.filters
-                )
-
-                if response.success:
-                    responses.append(response.data)
-                    self.context_manager.record_query(
-                        query=query,
-                        pattern="librenms_query",
-                        success=True,
-                        results=response.data
-                    )
-                else:
-                    self.logger.error(f"LibreNMS query failed: {response.error}")
-                    self.context_manager.record_query(
-                        query=query,
-                        pattern="librenms_query",
-                        success=False,
-                        results={"error": response.error}
-                    )
-                    return f"Error querying LibreNMS: {response.error}"
-
-            return self._format_responses(responses)
-
-        except Exception as e:
-            self.logger.error(f"Error in LibreNMS query: {e}")
+            self.logger.error(f"Error executing tool query: {e}")
             return f"An error occurred: {str(e)}"
 
     def _analyze_connectivity(self, params: str) -> str:
+        """Analyze network connectivity between devices"""
         try:
             source, target = self._parse_connectivity_params(params)
             
-            # Query device information
-            source_info = self._query_netbox(f"device:{source}")
-            target_info = self._query_netbox(f"device:{target}")
+            # Get device information from available tools
+            device_info = self.tool_manager.execute_query(
+                None,  # Query all tools
+                'get_devices',
+                filters={'name__in': [source, target]}
+            )
             
-            # Get interface status
-            source_status = self._query_librenms(f"ports:{source}")
-            target_status = self._query_librenms(f"ports:{target}")
+            # Get interface information
+            interface_info = self.tool_manager.execute_query(
+                None,
+                'get_interfaces',
+                device_id=source
+            )
             
             # Analyze connectivity
-            analysis = self._analyze_connection_data(
-                source_info, target_info,
-                source_status, target_status
-            )
+            analysis = self._analyze_connection_data(device_info, interface_info)
             
             self.context_manager.set_current_focus(f"connectivity_{source}_{target}")
             return analysis
@@ -220,79 +197,54 @@ class NetworkReActAgent:
             self.logger.error(f"Error in connectivity analysis: {e}")
             return f"An error occurred: {str(e)}"
 
-    def _validate_results(self, results: Dict, query: str) -> bool:
-        validation_prompt = f"""Query: "{query}"
-        Results: {results}
-        
-        Do these results fully answer the query?
-        Consider:
-        1. All requested information is present
-        2. Data is clear and complete
-        3. Necessary context is included
-        4. Technical accuracy for network operations
-        
-        Respond with:
-        Valid: Yes/No
-        Missing: [list any missing elements]
-        Improvements: [if any]
-        """
-        
-        try:
-            validation = self.llm(validation_prompt)
-            parsed = self._parse_validation_response(validation)
-            return parsed.get('valid', False)
-        except Exception as e:
-            self.logger.error(f"Validation error: {e}")
-            return False
+    def _format_responses(self, responses: List[Dict[str, Any]]) -> str:
+        """Format responses from multiple tools"""
+        formatted = []
+        for response in responses:
+            for tool_name, data in response.items():
+                formatted.append(f"[{tool_name}]\n{self._format_tool_data(data)}")
+        return "\n\n".join(formatted)
 
-    def _refine_query(self, results: Dict, query: str) -> Optional[str]:
-        refinement_prompt = f"""Given:
-        Original Query: "{query}"
-        Current Results: {results}
-        Recent Context: {self.context_manager.get_context_summary()}
-        
-        Analyze if additional information would help:
-        1. Missing context
-        2. Related metrics needed
-        3. Connected devices/services
-        
-        If more information needed, specify what and why.
-        If current results sufficient, respond with "COMPLETE"
-        """
-        
-        try:
-            refinement = self.llm(refinement_prompt)
-            if refinement.strip() == "COMPLETE":
-                return None
-            return refinement
-        except Exception as e:
-            self.logger.error(f"Refinement error: {e}")
-            return None
+    def _format_tool_data(self, data: Any) -> str:
+        """Format data from a specific tool"""
+        if isinstance(data, list):
+            return "\n".join(f"- {item}" for item in data)
+        elif isinstance(data, dict):
+            return "\n".join(f"{k}: {v}" for k, v in data.items())
+        return str(data)
 
     def process_query(self, query: str) -> str:
         try:
+            # Parse tool directive if present
+            match = self.TOOL_DIRECTIVE_PATTERN.match(query)
+            if match:
+                tool_name, actual_query = match.groups()
+                if not self.tool_manager.select_tool(tool_name):
+                    return f"Unknown tool: {tool_name}"
+            else:
+                actual_query = query
+                self.tool_manager.select_tool(None)
+
             # Get pattern matches and context
-            patterns = self.planner._get_pattern_matches(query)
+            patterns = self.planner._get_pattern_matches(actual_query)
             self.context_manager.update_active_patterns([p.pattern for p in patterns])
             context = self.context_manager.get_context_summary()
 
-            # Execute initial query
+            # Execute query
             results = self.agent_executor.run(
-                input=query,
+                input=actual_query,
                 context_summary=context,
                 query_patterns=patterns
             )
 
-            # Validate results
-            success = self._validate_results(results, query)
-            
-            # Refine if needed
+            # Validate and refine results
+            success = self._validate_results(results, actual_query)
             if not success:
-                refined_query = self._refine_query(results, query)
+                refined_query = self._refine_query(results, actual_query)
                 if refined_query:
                     additional_results = self.agent_executor.run(refined_query)
                     results = self._combine_results(results, additional_results)
-            
+
             # Record query
             self.context_manager.record_query(
                 query=query,
@@ -313,32 +265,3 @@ class NetworkReActAgent:
                 results={"error": str(e)}
             )
             return error_msg
-
-    def _combine_results(self, initial_results: Dict, additional_results: Dict) -> Dict:
-        """Combine initial and additional results intelligently"""
-        return {
-            "primary_response": initial_results,
-            "additional_context": additional_results,
-            "combined_analysis": self._analyze_combined_results(
-                initial_results, 
-                additional_results
-            )
-        }
-
-    def _analyze_combined_results(self, initial: Dict, additional: Dict) -> str:
-        """Analyze and summarize combined results"""
-        analysis_prompt = f"""Given:
-        Initial Results: {initial}
-        Additional Context: {additional}
-        
-        Provide a concise summary that:
-        1. Integrates both sets of information
-        2. Highlights key relationships
-        3. Provides technical context
-        """
-        
-        try:
-            return self.llm(analysis_prompt)
-        except Exception as e:
-            self.logger.error(f"Analysis error: {e}")
-            return "Error combining results"
