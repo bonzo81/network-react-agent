@@ -15,6 +15,8 @@ This project implements a ReAct pattern for network operations, enabling intelli
 - Standardized data mapping across different tools
 - Environment variable support for secure configuration
 - Tool-specific querying with aliasing support
+- Multi-tool query aggregation
+- Intelligent context handling
 
 ## Prerequisites
 
@@ -71,6 +73,8 @@ settings:
   default_behavior:
     query_all_enabled: true
     concurrent_queries: true
+    maintain_context: true
+    context_timeout: 300
 ```
 
 ### Tool Configuration (config/tools/)
@@ -89,6 +93,11 @@ api:
 settings:
   device_query_limit: 1000
   cache_enabled: true
+
+features:
+  topology: true
+  config_backup: true
+  performance_metrics: true
 ```
 
 ### Data Mappings (config/mappings/)
@@ -149,6 +158,22 @@ agent.process_query("@nx list all devices in site NYC")
 
 # Query LibreNMS specifically
 agent.process_query("@lnms show current alerts")
+
+# Multi-tool query
+agent.process_query("Show me all devices with critical alerts")
+```
+
+### Query Context
+
+The agent maintains context across queries:
+
+```python
+# Initial query sets context
+agent.process_query("@nx show devices in rack A1")
+
+# Follow-up queries maintain context
+agent.process_query("What are their interface statuses?")
+agent.process_query("Any alerts from these devices?")
 ```
 
 ## Extending with New Tools
@@ -165,6 +190,10 @@ class NewToolAdapter(NetworkToolAdapter):
         self.config = config
         # Initialize tool-specific client
 
+    def validate_connection(self) -> bool:
+        # Validate API connection
+        return True
+
     def get_devices(self, filters=None):
         # Implement device retrieval
         pass
@@ -179,6 +208,10 @@ class NewToolAdapter(NetworkToolAdapter):
 api:
   url: "${NEW_TOOL_URL}"
   token: "${NEW_TOOL_TOKEN}"
+
+features:
+  topology: true
+  alerts: true
 ```
 
 3. Add data mappings:
@@ -201,6 +234,32 @@ tools:
     aliases: ["nt"]
     config_file: "tools/new_tool.yaml"
     mappings_file: "mappings/new_tool_mappings.yaml"
+```
+
+### Runtime Tool Registration
+
+You can also register tools at runtime:
+
+```python
+from network_agent import NetworkReActAgent
+from my_tools import CustomToolAdapter
+
+agent = NetworkReActAgent()
+
+# Register new tool
+config = {
+    'api': {
+        'url': 'http://custom-tool.example.com',
+        'token': 'my-token'
+    }
+}
+
+agent.tool_manager.register_tool(
+    name='custom_tool',
+    tool_class=CustomToolAdapter,
+    config=config,
+    aliases=['ct']
+)
 ```
 
 ## Development
@@ -228,7 +287,9 @@ network-react-agent/
 │   └── mappings/          # Data mapping configs
 ├── src/
 │   ├── core/              # Core components
-│   │   └── network_tool_adapter.py
+│   │   ├── network_tool_adapter.py
+│   │   ├── tool_manager.py
+│   │   └── context_manager.py
 │   ├── adapters/          # Tool implementations
 │   │   ├── netbox_adapter.py
 │   │   └── librenms_adapter.py
