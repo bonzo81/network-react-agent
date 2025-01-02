@@ -6,7 +6,8 @@ setup(
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     install_requires=[
-        "langchain>=0.1.0",
+        "langchain>=0.3.13",
+        "langchain-community>=0.3.13",
         "requests>=2.31.0",
         "pydantic>=2.5.2",
         "PyYAML>=6.0.1",

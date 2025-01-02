@@ -1,44 +1,59 @@
-from typing import Dict, List, Optional, Any
-from langchain.llms import OpenAI
-from langchain.agents import Tool, AgentExecutor, LLMSingleActionAgent, ReActSingleInputOutputParser
-from langchain.memory import ConversationBufferMemory
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
 import logging
 import re
-from .query_planner import QueryPlanner
+from typing import Any, Dict, List, Optional
+
+from langchain.agents import AgentExecutor, LLMSingleActionAgent, Tool
+from langchain.agents.output_parsers import ReActSingleInputOutputParser
+from langchain.chains import LLMChain
+from langchain.llms import OpenAI
+from langchain_community.chat_models import ChatOpenAI
+from langchain.memory import ConversationBufferMemory
+from langchain.prompts import PromptTemplate
+
+from src.utils.config_loader import ConfigLoader
+
 from .context_manager import ContextManager
+from .query_planner import QueryPlanner
 from .tool_manager import ToolManager
-from ..utils.config_loader import ConfigLoader
+
 
 class NetworkReActAgent:
     # Regular expression for tool directives
-    TOOL_DIRECTIVE_PATTERN = re.compile(r'^@([\w-]+)\s+(.*)$')
+    TOOL_DIRECTIVE_PATTERN = re.compile(r"^@([\w-]+)\s+(.*)$")
 
     def __init__(
-        self,
-        config_dir: str = 'config',
-        semantic_mappings: Optional[Dict] = None
+        self, config_dir: str = "config", semantic_mappings: Optional[Dict] = None
     ):
+
         self.logger = logging.getLogger("NetworkReActAgent")
-        
+
         # Initialize configuration and managers
         self.config_loader = ConfigLoader(config_dir)
+
         self.config = self.config_loader.load_all()
-        
+
         # Initialize tool manager
         self.tool_manager = ToolManager(config_dir)
-        
+
         # Initialize LLM
-        self.llm = OpenAI(
-            api_key=self.config['main'].get('llm', {}).get('api_key'),
-            base_url=self.config['main'].get('llm', {}).get('api_base'),
-            model=self.config['main'].get('llm', {}).get('model', 'gpt-4'),
-            temperature=self.config['main'].get('llm', {}).get('temperature', 0)
+        self.llm = ChatOpenAI(
+            api_key=self.config["main"].get("llm", {}).get("api_key"),
+            base_url=self.config["main"].get("llm", {}).get("api_base"),
+            model=self.config["main"].get("llm", {}).get("model", "gpt-4"),
+            temperature=self.config["main"].get("llm", {}).get("temperature", 0),
         )
 
         # Initialize other managers
         self.context_manager = ContextManager()
+        # Dynamically gather query patterns from all configured tools
+        semantic_mappings = {
+            "query_patterns": {
+                pattern: info
+                for tool_name, tool_mappings in self.config["mappings"].items()
+                for pattern, info in tool_mappings.get("query_patterns", {}).items()
+            }
+        }
+
         self.planner = QueryPlanner(semantic_mappings, llm=self.llm)
         self.memory = ConversationBufferMemory(memory_key="chat_history")
 
@@ -48,8 +63,10 @@ class NetworkReActAgent:
 
     def _create_enhanced_prompt(self) -> PromptTemplate:
         # Get available tools for prompt
-        available_tools = ", ".join([f"@{tool}" for tool in self.tool_manager.tools.keys()])
-        
+        available_tools = ", ".join(
+            [f"@{tool}" for tool in self.tool_manager.tools.keys()]
+        )
+
         prefix = f"""You are a network operations assistant with access to multiple network management tools.
 
         Available tools: {available_tools}
@@ -77,15 +94,20 @@ class NetworkReActAgent:
         {agent_scratchpad}"""
 
         return PromptTemplate(
-            input_variables=["input", "context_summary", "query_patterns", "agent_scratchpad"],
-            template=prefix + suffix
+            input_variables=[
+                "input",
+                "context_summary",
+                "query_patterns",
+                "agent_scratchpad",
+            ],
+            template=prefix + suffix,
         )
 
     def _get_tool_capabilities(self) -> str:
         """Generate description of tool capabilities from config"""
         capabilities = []
         for tool_name, tool in self.tool_manager.tools.items():
-            features = self.config['tools'].get(tool_name, {}).get('features', {})
+            features = self.config["tools"].get(tool_name, {}).get("features", {})
             enabled_features = [k for k, v in features.items() if v]
             capabilities.append(f"- {tool_name}: {', '.join(enabled_features)}")
         return "\n".join(capabilities)
@@ -96,31 +118,28 @@ class NetworkReActAgent:
             Tool(
                 name="query_tool",
                 func=self._execute_tool_query,
-                description="Query specific network tool or all tools"
+                description="Query specific network tool or all tools",
             ),
             Tool(
                 name="analyze_connectivity",
                 func=self._analyze_connectivity,
-                description="Analyze network connectivity between devices"
-            )
+                description="Analyze network connectivity between devices",
+            ),
         ]
 
     def _create_agent(self) -> AgentExecutor:
         prompt = self._create_enhanced_prompt()
         llm_chain = LLMChain(llm=self.llm, prompt=prompt)
-        
+
         agent = LLMSingleActionAgent(
             llm_chain=llm_chain,
             output_parser=ReActSingleInputOutputParser(),
             stop=["\nObservation:", "\nQuestion:"],
-            allowed_tools=[tool.name for tool in self.tools]
+            allowed_tools=[tool.name for tool in self.tools],
         )
 
         return AgentExecutor.from_agent_and_tools(
-            agent=agent,
-            tools=self.tools,
-            memory=self.memory,
-            verbose=True
+            agent=agent, tools=self.tools, memory=self.memory, verbose=True
         )
 
     def _execute_tool_query(self, query: str) -> str:
@@ -143,23 +162,20 @@ class NetworkReActAgent:
             for step in self.planner.optimize_plan(steps):
                 # Execute query through tool manager
                 result = self.tool_manager.execute_query(
-                    tool_name,
-                    step.method,
-                    filters=step.filters
+                    tool_name, step.method, filters=step.filters
                 )
 
-                if any('error' in r for r in result.values()):
-                    errors = [f"{t}: {r['error']}" for t, r in result.items() if 'error' in r]
+                if any("error" in r for r in result.values()):
+                    errors = [
+                        f"{t}: {r['error']}" for t, r in result.items() if "error" in r
+                    ]
                     return f"Errors occurred: {'; '.join(errors)}"
 
                 responses.append(result)
 
             # Record query in context
             self.context_manager.record_query(
-                query=query,
-                pattern="tool_query",
-                success=True,
-                results=responses
+                query=query, pattern="tool_query", success=True, results=responses
             )
 
             return self._format_responses(responses)
@@ -172,24 +188,22 @@ class NetworkReActAgent:
         """Analyze network connectivity between devices"""
         try:
             source, target = self._parse_connectivity_params(params)
-            
+
             # Get device information from available tools
             device_info = self.tool_manager.execute_query(
                 None,  # Query all tools
-                'get_devices',
-                filters={'name__in': [source, target]}
+                "get_devices",
+                filters={"name__in": [source, target]},
             )
-            
+
             # Get interface information
             interface_info = self.tool_manager.execute_query(
-                None,
-                'get_interfaces',
-                device_id=source
+                None, "get_interfaces", device_id=source
             )
-            
+
             # Analyze connectivity
             analysis = self._analyze_connection_data(device_info, interface_info)
-            
+
             self.context_manager.set_current_focus(f"connectivity_{source}_{target}")
             return analysis
 
@@ -214,6 +228,7 @@ class NetworkReActAgent:
         return str(data)
 
     def process_query(self, query: str) -> str:
+        print(f"Processing query: {query}")
         try:
             # Parse tool directive if present
             match = self.TOOL_DIRECTIVE_PATTERN.match(query)
@@ -231,11 +246,12 @@ class NetworkReActAgent:
             context = self.context_manager.get_context_summary()
 
             # Execute query
-            results = self.agent_executor.run(
-                input=actual_query,
-                context_summary=context,
-                query_patterns=patterns
-            )
+            results = self.agent_executor.invoke({
+                "input": actual_query,
+                "context_summary": context,
+                "query_patterns": patterns,
+                "agent_scratchpad": ""
+            })
 
             # Validate and refine results
             success = self._validate_results(results, actual_query)
@@ -250,18 +266,18 @@ class NetworkReActAgent:
                 query=query,
                 pattern=patterns[0].pattern if patterns else "unknown",
                 success=success,
-                results=results
+                results=results,
             )
 
             return results
-
+        except Exception as e:
+            print(f"Exception occurred: {str(e)}")
+            print(f"Exception type: {type(e)}")
+            raise
         except Exception as e:
             self.logger.error(f"Error processing query: {e}")
             error_msg = f"An error occurred: {str(e)}"
             self.context_manager.record_query(
-                query=query,
-                pattern="error",
-                success=False,
-                results={"error": str(e)}
+                query=query, pattern="error", success=False, results={"error": str(e)}
             )
             return error_msg

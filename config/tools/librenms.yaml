@@ -3,7 +3,7 @@
 api:
   url: "${LIBRENMS_URL}"
   token: "${LIBRENMS_TOKEN}"
-  verify_ssl: true
+  verify_ssl: false
   timeout: 30
 
 settings:

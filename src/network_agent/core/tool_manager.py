@@ -1,45 +1,46 @@
-from typing import Dict, List, Optional, Any, Type
-from ..utils.config_loader import ConfigLoader, ConfigurationError
-from ...core.network_tool_adapter import NetworkToolAdapter
-from ...adapters.netbox_adapter import NetboxAdapter
-from ...adapters.librenms_adapter import LibreNMSAdapter
 import logging
+from typing import Any, Dict, List, Optional, Type
+
+from adapters.librenms_adapter import LibreNMSAdapter
+from adapters.netbox_adapter import NetboxAdapter
+from core.network_tool_adapter import NetworkToolAdapter
+from utils.config_loader import ConfigLoader, ConfigurationError
+
 
 class ToolInitializationError(Exception):
     """Raised when there's an error initializing a network tool."""
+
     pass
+
 
 class ToolManager:
     """Manages the lifecycle and interaction with network tool adapters."""
 
     # Registry of available tool adapters
-    TOOL_REGISTRY = {
-        'netbox': NetboxAdapter,
-        'librenms': LibreNMSAdapter
-    }
+    TOOL_REGISTRY = {"netbox": NetboxAdapter, "librenms": LibreNMSAdapter}
 
-    def __init__(self, config_dir: str = 'config'):
+    def __init__(self, config_dir: str = "config"):
         """Initialize the tool manager.
 
         Args:
             config_dir: Path to configuration directory
         """
-        self.logger = logging.getLogger('ToolManager')
+        self.logger = logging.getLogger("ToolManager")
         self.config_loader = ConfigLoader(config_dir)
         self.tools: Dict[str, NetworkToolAdapter] = {}
         self.aliases: Dict[str, str] = {}
         self.active_tool: Optional[str] = None
-        
+
         self._initialize_tools()
 
     def _initialize_tools(self) -> None:
         """Initialize all enabled tools from configuration."""
         try:
             config = self.config_loader.load_all()
-            main_config = config['main']
+            main_config = config["main"]
 
-            for tool_name, tool_config in main_config.get('tools', {}).items():
-                if not tool_config.get('enabled', False):
+            for tool_name, tool_config in main_config.get("tools", {}).items():
+                if not tool_config.get("enabled", False):
                     self.logger.debug(f"Tool {tool_name} is disabled, skipping")
                     continue
 
@@ -50,7 +51,7 @@ class ToolManager:
                 try:
                     # Initialize the tool adapter
                     tool_cls = self.TOOL_REGISTRY[tool_name]
-                    tool_instance = tool_cls(config['tools'].get(tool_name, {}))
+                    tool_instance = tool_cls(config["tools"].get(tool_name, {}))
 
                     # Validate connection
                     if not tool_instance.validate_connection():
@@ -61,14 +62,16 @@ class ToolManager:
                     self.tools[tool_name] = tool_instance
 
                     # Register aliases
-                    for alias in tool_config.get('aliases', []):
+                    for alias in tool_config.get("aliases", []):
                         self.aliases[alias] = tool_name
 
                     self.logger.info(f"Successfully initialized {tool_name}")
 
                 except Exception as e:
                     self.logger.error(f"Error initializing {tool_name}: {str(e)}")
-                    raise ToolInitializationError(f"Failed to initialize {tool_name}: {str(e)}")
+                    raise ToolInitializationError(
+                        f"Failed to initialize {tool_name}: {str(e)}"
+                    )
 
         except ConfigurationError as e:
             self.logger.error(f"Configuration error: {str(e)}")
@@ -117,7 +120,8 @@ class ToolManager:
         tool = self.get_tool(tool_identifier)
         if tool is not None:
             self.active_tool = (
-                tool_identifier if tool_identifier in self.tools
+                tool_identifier
+                if tool_identifier in self.tools
                 else self.aliases[tool_identifier]
             )
             return True
@@ -133,11 +137,7 @@ class ToolManager:
         return self.tools.get(self.active_tool) if self.active_tool else None
 
     def execute_query(
-        self,
-        tool: Optional[str],
-        method: str,
-        *args: Any,
-        **kwargs: Any
+        self, tool: Optional[str], method: str, *args: Any, **kwargs: Any
     ) -> Dict[str, Any]:
         """Execute a query on specific tool(s).
 
@@ -163,7 +163,9 @@ class ToolManager:
                     self.logger.error(f"Error executing {method} on {tool}: {str(e)}")
                     results[tool] = {"error": str(e)}
             else:
-                results[tool] = {"error": f"Method {method} not found or tool not available"}
+                results[tool] = {
+                    "error": f"Method {method} not found or tool not available"
+                }
 
         # If no tool specified, query all tools
         else:
@@ -178,9 +180,7 @@ class ToolManager:
                         )
                         results[tool_name] = {"error": str(e)}
                 else:
-                    results[tool_name] = {
-                        "error": f"Method {method} not found"
-                    }
+                    results[tool_name] = {"error": f"Method {method} not found"}
 
         return results
 
@@ -189,7 +189,7 @@ class ToolManager:
         name: str,
         tool_class: Type[NetworkToolAdapter],
         config: Dict[str, Any],
-        aliases: Optional[List[str]] = None
+        aliases: Optional[List[str]] = None,
     ) -> bool:
         """Register a new tool at runtime.
 
